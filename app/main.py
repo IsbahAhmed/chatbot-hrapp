@@ -2,14 +2,14 @@ import os
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from starlette.middleware import Middleware
-from app_security import RedactMiddleware, redact
-from retriever import Retriever
-from model_server import generate_answer
+from .app_security import RedactMiddleware, redact
+from .retriever import Retriever
+from .model_server import generate_answer
 from dotenv import load_dotenv
 
 load_dotenv()
 
-RELEVANCE_THRESHOLD = float(os.getenv('RELEVANCE_THRESHOLD', '0.65'))
+RELEVANCE_THRESHOLD = float(os.getenv('RELEVANCE_THRESHOLD', '0.1'))
 
 
 app = FastAPI(middleware=[Middleware(RedactMiddleware)])

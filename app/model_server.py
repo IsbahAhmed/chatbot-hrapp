@@ -13,14 +13,13 @@ from typing import List, Tuple
 
 
 def generate_answer(question: str, retrieved: List[Tuple[str, float]]) -> str:
-
-    if not retrieved:   
+    if len(retrieved) == 0:   
         return "I can only answer questions about official HR policies. Please contact HR."
 
 
 # Check top similarity
     top_sim = retrieved[0][1]
-    if top_sim < float(__import__('os').getenv('RELEVANCE_THRESHOLD','0.65')):
+    if top_sim < float(__import__('os').getenv('RELEVANCE_THRESHOLD','0.1')):
         return "I can only answer questions about official HR policies. Please rephrase or contact HR."
 
 
