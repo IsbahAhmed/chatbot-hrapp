@@ -1,17 +1,27 @@
 services:
   hr-api:
     build: .
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir app
     ports:
     - "8000:8000"
     environment:
     - CHROMA_EMBEDDING_MODEL=all-MiniLM-L6-v2
-    - RELEVANCE_THRESHOLD=0.65
+    - RELEVANCE_THRESHOLD=0.1
+    - CHROMA_COLLECTION=hr_policies
+    - LLM_PROVIDER=ollama
+    - OLLAMA_URL=http://host.docker.internal:11434
+    - OLLAMA_MODEL=deepseek-coder:1.3b
+    - GROQ_MODEL=llama-3.1-8b-instant
     deploy:
       resources:
         limits:
           memory: 2G
     networks:
     - hrnet
+    volumes:
+    - ./:/app
+    - ./chroma_db:/app/chroma_db
+    - ./private-docs:/app/private-docs
 
 
 networks:

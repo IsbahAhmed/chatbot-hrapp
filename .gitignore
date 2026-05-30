@@ -1,3 +1,7 @@
 /chroma_db
 app/chroma_db
 /app/__pycache__
+/app/venv
+.env.local
+.env
+/app/private-docs

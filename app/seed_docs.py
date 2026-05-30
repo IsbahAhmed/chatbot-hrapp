@@ -1,16 +1,19 @@
-# app/seed_docs.py
-# Run this once to seed your HR policy docs into Chroma DB
+from langchain_community.document_loaders import DirectoryLoader, PyPDFLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from uuid import uuid4
 from retriever import Retriever
-
-
-SAMPLE_DOCS = [
-{"id": "leave_policy", "text": "Annual leave: Employees get 20 paid days per year. Leave should be requested 7 days in advance except emergencies."},
-{"id": "overtime", "text": "Overtime: Non-exempt employees will be compensated at 1.5x for hours worked beyond 40 hours/week. Prior approval is required."},
-{"id": "compensation", "text": "Compensation reviews are annual and based on performance. Bonuses are discretionary."},
-]
+# Directory Loader
 
 
 if __name__ == '__main__':
+    loader = DirectoryLoader(".\private-docs", glob="*.pdf", loader_cls=PyPDFLoader)
+    data = loader.load()
+
+    # Chunking
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000, chunk_overlap=200, add_start_index=True
+    )
+    documents = text_splitter.split_documents(data)
     r = Retriever()
-    r.index_documents(SAMPLE_DOCS)
+    r.index_documents(documents)
     print('Seeded docs')
