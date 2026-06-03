@@ -9,11 +9,22 @@ function ErrorMessage({ content }) {
   this.type = "error";
 }
 
+function getSessionId() {
+  const key = 'hr_chat_session_id';
+  let id = localStorage.getItem(key);
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem(key, id);
+  }
+  return id;
+}
+
 function App() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const messagesEndRef = useRef(null);
   const [loading, setLoading] = useState(false);
+  const sessionIdRef = useRef(getSessionId());
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -26,7 +37,8 @@ function App() {
   const sendMessage = async () => {
     if (!input.trim()) return;
     setLoading(true);
-    const userMessage = { role: 'user', content: input };
+    const text = input.trim();
+    const userMessage = { role: 'user', content: text };
     const filtered  = messages.filter(msg => !(msg.type && msg.type === "error"));
     const newMessages = [...filtered, userMessage];
     setMessages(newMessages);
@@ -35,11 +47,16 @@ function App() {
       const response = await fetch('http://localhost:8000/ask', {
         method: 'post',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: newMessages })
+        body: JSON.stringify({
+          message: text,
+          session_id: sessionIdRef.current,
+        })
       });
       const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.detail || 'Request failed');
+      }
       const botMessage = { role: 'assistant', content: data.reply };
-      setLoading(false)
       setMessages([...newMessages, botMessage]);
     } catch (error) {
       console.error('Error:', error);
@@ -49,6 +66,23 @@ function App() {
     finally {
       setLoading(false)
     }
+  };
+
+  const startNewChat = async () => {
+    const oldSessionId = sessionIdRef.current;
+    try {
+      await fetch('http://localhost:8000/session/reset', {
+        method: 'post',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: oldSessionId }),
+      });
+    } catch (e) {
+      console.warn('Could not reset server session', e);
+    }
+    localStorage.removeItem('hr_chat_session_id');
+    sessionIdRef.current = getSessionId();
+    setMessages([]);
+    setInput('');
   };
 
   return (
@@ -76,7 +110,9 @@ function App() {
           onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
           placeholder="Type your message..."
         />
-        {/* <button onClick={sendMessage}>Send</button> */}
+        <button type="button" onClick={startNewChat} title="Start new conversation">
+          New chat
+        </button>
       </div>
     </div>
   )

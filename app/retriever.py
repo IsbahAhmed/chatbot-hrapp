@@ -40,7 +40,7 @@ class Retriever:
         self.vstore.add_documents(documents=docs, ids=ids)
 
 
-    def query(self, query_text: str, n_results: int = 3):
+    def query(self, query_text: str, n_results: int = 3) -> list: 
         if not query_text.strip():
             return []
 
