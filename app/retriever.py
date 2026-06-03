@@ -1,52 +1,97 @@
 # app/retriever.py
-from sentence_transformers import SentenceTransformer
-import chromadb
 import os
 from typing import List
+from uuid import uuid4
 
+from langchain_chroma import Chroma
+from langchain_core.documents import Document
+from langchain_core.embeddings import Embeddings
 
 EMBED_MODEL = os.getenv("CHROMA_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
+CHROMA_COLLECTION = os.getenv("CHROMA_COLLECTION", "hr_policies")
+EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "huggingface").lower()
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+OLLAMA_EMBED_MODEL = os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
+
+
+def _build_embeddings() -> Embeddings:
+    """Embeddings for Chroma. Use EMBEDDING_PROVIDER=ollama to run on Ollama (AMD GPU via Ollama)."""
+    if EMBEDDING_PROVIDER == "ollama":
+        try:
+            from langchain_ollama import OllamaEmbeddings
+        except ImportError as e:
+            raise RuntimeError(
+                "EMBEDDING_PROVIDER=ollama requires langchain-ollama. "
+                "Install it and run: ollama pull " + OLLAMA_EMBED_MODEL
+            ) from e
+        return OllamaEmbeddings(model=OLLAMA_EMBED_MODEL, base_url=OLLAMA_URL)
+
+    from langchain_huggingface import HuggingFaceEmbeddings
+
+    model_kwargs = {}
+    encode_kwargs = {"normalize_embeddings": True}
+    device_mode = os.getenv("EMBED_DEVICE", "cpu").lower()
+    if device_mode not in ("cpu", "auto"):
+        if device_mode in ("dml", "directml", "gpu"):
+            try:
+                import torch_directml  # type: ignore[import-not-found]
+
+                model_kwargs["device"] = torch_directml.device()
+            except ImportError:
+                print("torch-directml not installed; using CPU for embeddings.")
+        elif device_mode == "cuda":
+            import torch
+
+            if torch.cuda.is_available():
+                model_kwargs["device"] = "cuda"
+
+    return HuggingFaceEmbeddings(
+        model_name=EMBED_MODEL,
+        model_kwargs=model_kwargs,
+        encode_kwargs=encode_kwargs,
+    )
 
 
 class Retriever:
     def __init__(self):
-# Embedded chroma instance (in-process). For production, use server or managed instance inside VPC.
-        self.client = chromadb.PersistentClient(path="./chroma_db")
-        self.collection = None
-        self.embedder = SentenceTransformer(EMBED_MODEL)
-        self._ensure_collection()
+        persist_directory = os.getenv(
+            "CHROMA_PERSIST_DIR",
+            os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "chroma_db")),
+        )
 
+        self.embeddings = _build_embeddings()
+        self.vstore = Chroma(
+            collection_name=CHROMA_COLLECTION,
+            persist_directory=persist_directory,
+            embedding_function=self.embeddings,
+        )
+        self.retriever = self.vstore.as_retriever(
+            search_type="similarity",
+            search_kwargs={"k": 4},
+        )
 
-    def _ensure_collection(self):
+        if EMBEDDING_PROVIDER != "ollama":
+            try:
+                self.embeddings.embed_query("warmup")
+            except Exception as e:
+                print(f"Embedding warmup skipped: {e}")
+
+    def index_documents(self, docs: List[Document]):
+        if not docs:
+            return
+
+        ids = [str(uuid4()) for _ in range(len(docs))]
+        self.vstore.add_documents(documents=docs, ids=ids)
+
+    def query(self, query_text: str, n_results: int = 3) -> list:
+        if not query_text.strip():
+            return []
+
         try:
-            self.collection = self.client.get_collection(name="hr_policies")
+            results = self.vstore.similarity_search_with_relevance_scores(
+                query_text, k=n_results
+            )
+            return [(doc.page_content, float(score)) for doc, score in results]
         except Exception:
-            self.collection = self.client.create_collection(name="hr_policies")
-
-
-    def index_documents(self, docs: List[dict]):
-# docs: list of {"id": str, "text": str}
-        texts = [d["text"] for d in docs]
-        ids = [d["id"] for d in docs]
-        embeddings = self.embedder.encode(texts, show_progress_bar=False)
-        if self.collection:
-            self.collection.add(ids=ids, documents=texts, embeddings=embeddings)
-
-
-    def query(self, query_text: str, n_results: int = 3):
-        q_emb = self.embedder.encode([query_text])[0]
-        if not self.collection:
-            return []
-        results = self.collection.query(query_embeddings=[q_emb], n_results=n_results, include=['documents','distances'])
-        if not results:
-            return []
-# results format: dict with 'documents' and 'distances'
-        docs_list = results.get('documents')
-        distances_list = results.get('distances')
-        if not docs_list or not distances_list or len(docs_list) == 0 or len(distances_list) == 0:
-            return []
-        docs = docs_list[0]
-        distances = distances_list[0]
-# chroma uses distance; higher means less similar depending on implementation; convert to similarity
-        similarities = [1 - d for d in distances]
-        return list(zip(docs, similarities))
+            results = self.vstore.similarity_search_with_score(query_text, k=n_results)
+            return [(doc.page_content, 1.0 / (1.0 + float(dist))) for doc, dist in results]

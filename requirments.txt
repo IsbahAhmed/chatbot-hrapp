@@ -1,7 +1,0 @@
-fastapi
-uvicorn[standard]
-sentence-transformers
-chromadb
-pydantic
-python-dotenv
-requests
