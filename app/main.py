@@ -9,6 +9,7 @@ from app_security import RedactMiddleware, redact
 from retriever import Retriever
 from conversation_history import HISTORY_WINDOW, build_conversation_context
 from session_store import SessionStore, StoredMessage
+from ollama_gpu import log_ollama_status
 from dotenv import load_dotenv
 import requests
 
@@ -33,6 +34,8 @@ TEMPRETURE = 0.1
 RELEVANCE_THRESHOLD = float(os.getenv("RELEVANCE_THRESHOLD", 0.1))
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "deepseek-coder:1.3b")
+OLLAMA_NUM_GPU = os.getenv("OLLAMA_NUM_GPU")  # optional layers on GPU, e.g. -1 = all
+OLLAMA_NUM_THREAD = os.getenv("OLLAMA_NUM_THREAD")  # optional CPU threads fallback
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama").lower()  # "ollama" | "groq"
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
 
@@ -84,11 +87,16 @@ def _build_ollama_llm():
         raise RuntimeError(
             "Missing dependency: langchain-ollama. Install it and restart the app."
         )
-    return ChatOllama(
-        model=OLLAMA_MODEL,
-        base_url=OLLAMA_URL,
-        temperature=TEMPRETURE,
-    )
+    kwargs = {
+        "model": OLLAMA_MODEL,
+        "base_url": OLLAMA_URL,
+        "temperature": TEMPRETURE,
+    }
+    if OLLAMA_NUM_GPU is not None and OLLAMA_NUM_GPU.strip() != "":
+        kwargs["num_gpu"] = int(OLLAMA_NUM_GPU)
+    if OLLAMA_NUM_THREAD is not None and OLLAMA_NUM_THREAD.strip() != "":
+        kwargs["num_thread"] = int(OLLAMA_NUM_THREAD)
+    return ChatOllama(**kwargs)
 
 
 def _build_groq_llm():
@@ -244,17 +252,7 @@ async def startup_event():
     except Exception as e:
         print(f"LLM init warning: {e}")
 
-    try:
-        if LLM_PROVIDER == "ollama":
-            response = requests.get(f"{OLLAMA_URL}/api/tags", timeout=10)
-            if response.status_code == 200:
-                models = response.json().get("models", [])
-                model_names = [model["name"] for model in models]
-                print(f"Ollama connected. Available models: {model_names}")
-            else:
-                print("Ollama is running but returned an error")
-        else:
-            print("Using Groq")
-    except Exception as e:
-        print(f"Cannot connect to {LLM_PROVIDER}: {e}")
-        print(f"Make sure to run: {LLM_PROVIDER} serve")
+    if LLM_PROVIDER == "ollama":
+        log_ollama_status(OLLAMA_MODEL)
+    else:
+        print(f"LLM provider: {LLM_PROVIDER} (ChatOllama unused; set LLM_PROVIDER=ollama for local AMD GPU)")
